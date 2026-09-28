@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Plus, Square, Cpu, Layers } from 'lucide-react';
-import { RunnerCard, RunnerConfig } from './components/RunnerCard';
+import { RunnerCard, RunnerConfig, RunnerStatus } from './components/RunnerCard';
+import { extractUrls } from './utils/logParser';
 import './styles.css';
 
 const LOCAL_STORAGE_KEY = 'launchdeck_runners_v2';
@@ -14,18 +15,36 @@ const DEFAULT_RUNNERS: RunnerConfig[] = [
     name: 'Frontend Server',
     command: 'npm run dev',
     cwd: '',
+    status: 'idle',
     isRunning: false,
     logs: [],
+    detectedUrls: [],
+    generation: 0,
   },
   {
     id: 'runner-2',
     name: 'Backend Service',
     command: 'mvn spring-boot:run',
     cwd: '',
+    status: 'idle',
     isRunning: false,
     logs: [],
+    detectedUrls: [],
+    generation: 0,
   },
 ];
+
+interface ProcessBatchPayload {
+  id: string;
+  generation: number;
+  entries: Array<{ log_type: 'stdout' | 'stderr'; line: string }>;
+}
+
+interface ProcessExitPayload {
+  id: string;
+  generation: number;
+  exit_code: number | null;
+}
 
 export function App() {
   const [runners, setRunners] = useState<RunnerConfig[]>(() => {
@@ -33,14 +52,17 @@ export function App() {
       const saved = localStorage.getItem(LOCAL_STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        // Ensure log array and running state reset on fresh app start
+        // Ensure log array, running states, and generation counters reset on fresh app start
         return parsed.map((item: Partial<RunnerConfig>) => ({
           id: item.id || `runner-${Date.now()}-${Math.random()}`,
           name: item.name || 'Launcher Box',
           command: item.command || '',
           cwd: item.cwd || '',
+          status: 'idle' as RunnerStatus,
           isRunning: false,
           logs: [],
+          detectedUrls: [],
+          generation: 0,
         }));
       }
     } catch (e) {
@@ -49,59 +71,107 @@ export function App() {
     return DEFAULT_RUNNERS;
   });
 
-  // Save configurations (name, command, cwd) to local storage
-  useEffect(() => {
-    const toSave = runners.map(({ id, name, command, cwd }) => ({
-      id,
-      name,
-      command,
-      cwd,
-    }));
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(toSave));
+  // Reference to always access current runners inside asynchronous event listeners
+  const runnersRef = useRef<RunnerConfig[]>(runners);
+  runnersRef.current = runners;
+
+  // Persist configurations only when user-configured fields change (NOT on every log update)
+  const configSignature = useMemo(() => {
+    return JSON.stringify(
+      runners.map(({ id, name, command, cwd }) => ({
+        id,
+        name,
+        command,
+        cwd,
+      }))
+    );
   }, [runners]);
 
-  // Setup Tauri event listeners for stdout, stderr, process-exit
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, configSignature);
+    } catch (err) {
+      console.error('Failed to save launcher configs:', err);
+    }
+  }, [configSignature]);
+
+  // Setup Tauri event listeners for batched logs, legacy logs, and process-exit
   useEffect(() => {
     let isMounted = true;
     const cleanups: Array<() => void> = [];
 
     async function setupListeners() {
       try {
-        const unlistenStdout = await listen<{ id: string; line: string }>('process-stdout', (event) => {
+        // High-performance batched log listener
+        const unlistenLogs = await listen<ProcessBatchPayload>('process-logs', (event) => {
           if (!isMounted) return;
-          const { id, line } = event.payload;
-          appendLog(id, 'stdout', line);
-        });
-        if (isMounted) cleanups.push(unlistenStdout);
-        else unlistenStdout();
+          const { id, generation, entries } = event.payload;
+          if (!entries || entries.length === 0) return;
 
-        const unlistenStderr = await listen<{ id: string; line: string }>('process-stderr', (event) => {
-          if (!isMounted) return;
-          const { id, line } = event.payload;
-          appendLog(id, 'stderr', line);
-        });
-        if (isMounted) cleanups.push(unlistenStderr);
-        else unlistenStderr();
-
-        const unlistenExit = await listen<{ id: string; exit_code: number | null }>('process-exit', (event) => {
-          if (!isMounted) return;
-          const { id, exit_code } = event.payload;
           setRunners((prev) =>
-            prev.map((r) =>
-              r.id === id
-                ? {
-                    ...r,
-                    isRunning: false,
-                    logs: [
-                      ...r.logs,
-                      {
-                        type: 'stdout' as const,
-                        line: `[Process finished${exit_code !== null && exit_code !== undefined ? ` with exit code ${exit_code}` : ''}]`,
-                      },
-                    ].slice(-300),
+            prev.map((r) => {
+              if (r.id === id) {
+                // Reject logs from older process generations
+                if (generation !== undefined && r.generation !== undefined && generation < r.generation) {
+                  return r;
+                }
+
+                // Incrementally extract URLs from newly arrived lines only
+                const newUrls: string[] = [];
+                for (const entry of entries) {
+                  const found = extractUrls(entry.line);
+                  for (const u of found) {
+                    if (!r.detectedUrls?.includes(u) && !newUrls.includes(u)) {
+                      newUrls.push(u);
+                    }
                   }
-                : r
-            )
+                }
+
+                const formattedEntries: Array<{ type: 'stdout' | 'stderr'; line: string }> = entries.map((e) => ({
+                  type: e.log_type,
+                  line: e.line,
+                }));
+
+                const nextLogs = [...r.logs, ...formattedEntries].slice(-300);
+                const currentUrls = r.detectedUrls || [];
+                const updatedUrls = newUrls.length > 0 ? [...currentUrls, ...newUrls] : currentUrls;
+
+                return {
+                  ...r,
+                  logs: nextLogs,
+                  detectedUrls: updatedUrls,
+                };
+              }
+              return r;
+            })
+          );
+        });
+        if (isMounted) cleanups.push(unlistenLogs);
+        else unlistenLogs();
+
+        // Process exit listener with generation race protection
+        const unlistenExit = await listen<ProcessExitPayload>('process-exit', (event) => {
+          if (!isMounted) return;
+          const { id, generation, exit_code } = event.payload;
+
+          setRunners((prev) =>
+            prev.map((r) => {
+              if (r.id === id) {
+                // Ignore stale exit event if a newer generation has already started
+                if (generation !== undefined && r.generation !== undefined && generation < r.generation) {
+                  return r;
+                }
+
+                const exitMsg = `[Process finished${exit_code !== null && exit_code !== undefined ? ` with exit code ${exit_code}` : ''}]`;
+                return {
+                  ...r,
+                  status: 'idle',
+                  isRunning: false,
+                  logs: [...r.logs, { type: 'stdout' as const, line: exitMsg }].slice(-300),
+                };
+              }
+              return r;
+            })
           );
         });
         if (isMounted) cleanups.push(unlistenExit);
@@ -123,9 +193,14 @@ export function App() {
     setRunners((prev) =>
       prev.map((r) => {
         if (r.id === id) {
-          // Limit logs buffer to latest 300 lines
           const nextLogs = [...r.logs, { type, line }].slice(-300);
-          return { ...r, logs: nextLogs };
+          const currentUrls = r.detectedUrls || [];
+          const newUrls = extractUrls(line).filter((u) => !currentUrls.includes(u));
+          return {
+            ...r,
+            logs: nextLogs,
+            detectedUrls: newUrls.length > 0 ? [...currentUrls, ...newUrls] : currentUrls,
+          };
         }
         return r;
       })
@@ -140,8 +215,11 @@ export function App() {
       name: presetName || `Runner ${runners.length + 1}`,
       command: presetCmd || '',
       cwd: '',
+      status: 'idle',
       isRunning: false,
       logs: [],
+      detectedUrls: [],
+      generation: 0,
     };
     setRunners((prev) => [...prev, newRunner]);
   };
@@ -154,7 +232,7 @@ export function App() {
 
   const handleRemoveRunner = async (id: string) => {
     const target = runners.find((r) => r.id === id);
-    if (target?.isRunning) {
+    if (target && (target.status === 'running' || target.status === 'starting' || target.status === 'stopping')) {
       await handleStopProcess(id);
     }
     setRunners((prev) => prev.filter((r) => r.id !== id));
@@ -164,44 +242,131 @@ export function App() {
     const target = runners.find((r) => r.id === id);
     if (!target || !target.command.trim()) return;
 
-    try {
-      // Mark running in state
-      setRunners((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, isRunning: true } : r))
-      );
+    // Prevent duplicate start attempts if already starting, running, or stopping
+    if (target.status === 'starting' || target.status === 'running' || target.status === 'stopping') {
+      return;
+    }
 
-      await invoke('spawn_process', {
+    const nextGen = (target.generation || 0) + 1;
+
+    // Immediately mark as Starting
+    setRunners((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              status: 'starting' as RunnerStatus,
+              isRunning: true,
+              generation: nextGen,
+              detectedUrls: [],
+              logs: [
+                ...r.logs,
+                { type: 'stdout' as const, line: `[Starting process: ${target.command.trim()}...]` },
+              ].slice(-300),
+            }
+          : r
+      )
+    );
+
+    try {
+      const res = await invoke<{ pid: number; generation: number }>('spawn_process', {
         id,
         command: target.command.trim(),
         cwd: target.cwd.trim() || null,
+        generation: nextGen,
       });
+
+      // Update to Running state with generation confirmed
+      setRunners((prev) =>
+        prev.map((r) =>
+          r.id === id && r.generation === nextGen
+            ? {
+                ...r,
+                status: 'running',
+                isRunning: true,
+                generation: res?.generation ?? nextGen,
+              }
+            : r
+        )
+      );
     } catch (err: any) {
       console.error(`Failed to start process for ${id}:`, err);
-      appendLog(id, 'stderr', `[LAUNCH FAILURE]: ${err?.toString() || err}`);
+      const errMsg = err?.toString() || String(err);
+      appendLog(id, 'stderr', `[LAUNCH FAILURE]: ${errMsg}`);
       setRunners((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, isRunning: false } : r))
+        prev.map((r) =>
+          r.id === id && r.generation === nextGen
+            ? { ...r, status: 'idle', isRunning: false }
+            : r
+        )
       );
     }
   };
 
   const handleStopProcess = async (id: string) => {
+    const target = runners.find((r) => r.id === id);
+    if (!target) return;
+
+    // Avoid duplicate stops or stopping idle runners
+    if (target.status === 'idle' || target.status === 'stopping') {
+      return;
+    }
+
+    const currentGen = target.generation;
+
+    // Immediately reflect Stopping state so button disables and indicates activity
+    setRunners((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              status: 'stopping',
+            }
+          : r
+      )
+    );
+
     try {
       await invoke('stop_process', { id });
+      // Reset runner state when stop command returns
       setRunners((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, isRunning: false } : r))
+        prev.map((r) =>
+          r.id === id && r.generation === currentGen
+            ? {
+                ...r,
+                status: 'idle',
+                isRunning: false,
+              }
+            : r
+        )
       );
-    } catch (err) {
+    } catch (err: any) {
       console.error(`Failed to stop process for ${id}:`, err);
+      const errMsg = err?.toString() || String(err);
+      appendLog(id, 'stderr', `[STOP FAILURE]: ${errMsg}`);
+      setRunners((prev) =>
+        prev.map((r) =>
+          r.id === id && r.generation === currentGen
+            ? {
+                ...r,
+                status: 'idle',
+                isRunning: false,
+              }
+            : r
+        )
+      );
     }
   };
 
   const handleClearLogs = (id: string) => {
     setRunners((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, logs: [] } : r))
+      prev.map((r) => (r.id === id ? { ...r, logs: [], detectedUrls: [] } : r))
     );
   };
 
-  const activeCount = runners.filter((r) => r.isRunning).length;
+  const activeCount = runners.filter(
+    (r) => r.status === 'running' || r.status === 'starting' || r.isRunning
+  ).length;
 
   return (
     <div className="app-container">
@@ -218,17 +383,17 @@ export function App() {
         </div>
 
         <div className="header-actions">
-          {runners.length > 0 && (
-            <>
-              {activeCount > 0 && (
-                <button
-                  className="btn-secondary"
-                  onClick={() => runners.filter((r) => r.isRunning).forEach((r) => handleStopProcess(r.id))}
-                >
-                  <Square size={14} /> Stop All ({activeCount})
-                </button>
-              )}
-            </>
+          {runners.length > 0 && activeCount > 0 && (
+            <button
+              className="btn-secondary"
+              onClick={() =>
+                runners
+                  .filter((r) => r.status === 'running' || r.status === 'starting')
+                  .forEach((r) => handleStopProcess(r.id))
+              }
+            >
+              <Square size={14} /> Stop All ({activeCount})
+            </button>
           )}
 
           {/* Primary "Add" Button dynamically creates new configuration row/box */}

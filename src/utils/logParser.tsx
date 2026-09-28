@@ -166,7 +166,7 @@ interface LogLineProps {
  * Strips corrupted escape codes, formats ANSI colors, and transforms
  * detected URLs into clickable, interactive links.
  */
-export const LogLine: React.FC<LogLineProps> = ({ line, type, onOpenUrl = openUrlInBrowser }) => {
+export const LogLine = React.memo<LogLineProps>(({ line, type, onOpenUrl = openUrlInBrowser }) => {
   const detectedUrls = extractUrls(line);
 
   // If no URLs detected, render ANSI styled segments directly
@@ -227,4 +227,5 @@ export const LogLine: React.FC<LogLineProps> = ({ line, type, onOpenUrl = openUr
   }
 
   return <div className={`log-line ${type} has-url`}>{parts}</div>;
-};
+});
+

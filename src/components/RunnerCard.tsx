@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Play,
   Square,
@@ -12,16 +12,22 @@ import {
   ExternalLink,
   Copy,
   Check,
+  Loader2,
 } from 'lucide-react';
-import { LogLine, extractUrls, stripAnsi, openUrlInBrowser } from '../utils/logParser';
+import { LogLine, stripAnsi, openUrlInBrowser } from '../utils/logParser';
+
+export type RunnerStatus = 'idle' | 'starting' | 'running' | 'stopping';
 
 export interface RunnerConfig {
   id: string;
   name: string;
   command: string;
   cwd: string;
+  status?: RunnerStatus;
   isRunning: boolean;
   logs: Array<{ type: 'stdout' | 'stderr'; line: string }>;
+  detectedUrls?: string[];
+  generation?: number;
 }
 
 interface RunnerCardProps {
@@ -44,31 +50,28 @@ export const RunnerCard: React.FC<RunnerCardProps> = ({
   const [showLogs, setShowLogs] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [copiedLogs, setCopiedLogs] = useState(false);
-  const logEndRef = useRef<HTMLDivElement | null>(null);
+  const logDrawerRef = useRef<HTMLDivElement | null>(null);
+  const isNearBottomRef = useRef(true);
 
-  // Command input text determines whether Start button dynamically appears
+  const status: RunnerStatus = runner.status || (runner.isRunning ? 'running' : 'idle');
+  const isInputsDisabled = status !== 'idle';
   const hasCommand = runner.command.trim().length > 0;
+  const detectedUrls = runner.detectedUrls || [];
 
-  // Auto-scroll to bottom of logs when new lines arrive
+  // Track if user is near bottom to avoid fighting scroll when reading previous logs
+  const handleScroll = useCallback(() => {
+    if (!logDrawerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = logDrawerRef.current;
+    isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < 60;
+  }, []);
+
+  // Controlled scroll without smooth animation to keep high-frequency output fluid
   useEffect(() => {
-    if (showLogs && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (!showLogs || !logDrawerRef.current) return;
+    if (isNearBottomRef.current) {
+      logDrawerRef.current.scrollTop = logDrawerRef.current.scrollHeight;
     }
   }, [runner.logs.length, showLogs]);
-
-  // Extract all unique URLs detected across the runner's logs
-  const detectedUrls = useMemo(() => {
-    const list: string[] = [];
-    for (const log of runner.logs) {
-      const urls = extractUrls(log.line);
-      for (const u of urls) {
-        if (!list.includes(u)) {
-          list.push(u);
-        }
-      }
-    }
-    return list;
-  }, [runner.logs]);
 
   // Prefer localhost or 127.0.0.1 as the primary live link
   const primaryUrl = useMemo(() => {
@@ -78,7 +81,7 @@ export const RunnerCard: React.FC<RunnerCardProps> = ({
   }, [detectedUrls]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && hasCommand && !runner.isRunning) {
+    if (e.key === 'Enter' && hasCommand && status === 'idle') {
       onStart(runner.id);
     }
   };
@@ -121,14 +124,23 @@ export const RunnerCard: React.FC<RunnerCardProps> = ({
             onChange={(e) => onUpdate(runner.id, { name: e.target.value })}
             placeholder="Runner Name"
           />
-          <span className={`status-badge ${runner.isRunning ? 'running' : 'idle'}`}>
-            {runner.isRunning ? (
+          <span className={`status-badge ${status}`}>
+            {status === 'starting' && (
               <>
-                <span className="pulse-dot"></span> Running
+                <span className="pulse-dot starting"></span> Starting
               </>
-            ) : (
-              'Idle'
             )}
+            {status === 'running' && (
+              <>
+                <span className="pulse-dot running"></span> Running
+              </>
+            )}
+            {status === 'stopping' && (
+              <>
+                <span className="pulse-dot stopping"></span> Stopping
+              </>
+            )}
+            {status === 'idle' && 'Idle'}
           </span>
 
           {/* Prominent Live Website Link Badge */}
@@ -165,6 +177,7 @@ export const RunnerCard: React.FC<RunnerCardProps> = ({
             className="btn-icon danger"
             onClick={() => onRemove(runner.id)}
             title="Remove Launcher Box"
+            disabled={status === 'stopping'}
           >
             <Trash2 size={16} />
           </button>
@@ -181,7 +194,7 @@ export const RunnerCard: React.FC<RunnerCardProps> = ({
               type="text"
               className="field-input"
               value={runner.command}
-              disabled={runner.isRunning}
+              disabled={isInputsDisabled}
               onChange={(e) => onUpdate(runner.id, { command: e.target.value })}
               onKeyDown={handleKeyDown}
               placeholder="Command (e.g., npm run dev, mvn spring-boot:run)"
@@ -195,7 +208,7 @@ export const RunnerCard: React.FC<RunnerCardProps> = ({
               type="text"
               className="field-input"
               value={runner.cwd}
-              disabled={runner.isRunning}
+              disabled={isInputsDisabled}
               onChange={(e) => onUpdate(runner.id, { cwd: e.target.value })}
               placeholder="Path / Directory (leave blank for system default directory)"
             />
@@ -204,16 +217,40 @@ export const RunnerCard: React.FC<RunnerCardProps> = ({
 
         {/* Dynamic Start & Stop Button Logic */}
         <div className="action-column">
-          {runner.isRunning ? (
+          {status === 'starting' && (
+            <button
+              className="btn-toggle-process starting"
+              disabled
+              title="Process is starting..."
+            >
+              <Loader2 size={20} className="spin-icon" />
+              <span>STARTING...</span>
+            </button>
+          )}
+
+          {status === 'stopping' && (
+            <button
+              className="btn-toggle-process stopping"
+              disabled
+              title="Process is stopping..."
+            >
+              <Loader2 size={20} className="spin-icon" />
+              <span>STOPPING...</span>
+            </button>
+          )}
+
+          {status === 'running' && (
             <button
               className="btn-toggle-process stop"
               onClick={() => onStop(runner.id)}
-              title="Stop process (Ctrl+C termination)"
+              title="Stop process"
             >
               <Square size={20} fill="currentColor" />
               <span>STOP</span>
             </button>
-          ) : (
+          )}
+
+          {status === 'idle' && (
             hasCommand && (
               <button
                 className="btn-toggle-process start"
@@ -264,7 +301,7 @@ export const RunnerCard: React.FC<RunnerCardProps> = ({
 
       {/* Collapsible Log Terminal Drawer */}
       {showLogs && (
-        <div className="log-drawer">
+        <div className="log-drawer" ref={logDrawerRef} onScroll={handleScroll}>
           {/* Quick banner if live server URLs were detected */}
           {detectedUrls.length > 0 && (
             <div className="log-drawer-banner">
@@ -301,10 +338,8 @@ export const RunnerCard: React.FC<RunnerCardProps> = ({
               />
             ))
           )}
-          <div ref={logEndRef} />
         </div>
       )}
     </div>
   );
 };
-
