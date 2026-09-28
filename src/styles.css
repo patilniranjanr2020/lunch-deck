@@ -86,35 +86,49 @@ input, button, textarea {
 .brand-section {
   display: flex;
   align-items: center;
-  gap: 14px;
 }
 
-.brand-icon-wrapper {
-  width: 44px;
-  height: 44px;
-  border-radius: var(--radius-md);
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+.brand-block {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.brand-heading {
+  margin: 0;
+  padding: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-glow);
-  color: #fff;
+  line-height: 1;
 }
 
-.brand-text h1 {
-  font-size: 1.35rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  background: linear-gradient(180deg, #ffffff, #cbd5e1);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+.brand-logo {
+  height: 38px;
+  width: auto;
+  max-width: 100%;
+  display: block;
+  object-fit: contain;
 }
 
-.brand-text p {
-  font-size: 0.8rem;
+.brand-tagline {
+  font-size: 0.775rem;
   color: var(--text-secondary);
-  font-weight: 400;
+  font-weight: 500;
+  letter-spacing: -0.01em;
   margin-top: 2px;
+}
+
+@media (max-width: 720px) {
+  .app-header {
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .brand-logo {
+    height: 32px;
+  }
+  .brand-tagline {
+    font-size: 0.725rem;
+  }
 }
 
 .header-actions {

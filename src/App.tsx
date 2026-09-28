@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Plus, Square, Cpu, Layers } from 'lucide-react';
+import { Plus, Square, Layers } from 'lucide-react';
 import { RunnerCard, RunnerConfig, RunnerStatus } from './components/RunnerCard';
 import { extractUrls } from './utils/logParser';
+import launchDeckLogo from './assets/launchdeck-logo.svg';
 import './styles.css';
 
 const LOCAL_STORAGE_KEY = 'launchdeck_runners_v2';
@@ -373,12 +374,17 @@ export function App() {
       {/* App Header */}
       <header className="app-header">
         <div className="brand-section">
-          <div className="brand-icon-wrapper">
-            <Cpu size={24} />
-          </div>
-          <div className="brand-text">
-            <h1>LaunchDeck</h1>
-            <p>Multi-Process Developer Launcher</p>
+          <div className="brand-block">
+            <h1 className="brand-heading">
+              <img
+                src={launchDeckLogo}
+                alt="LaunchDeck"
+                className="brand-logo"
+                width={131}
+                height={38}
+              />
+            </h1>
+            <p className="brand-tagline">Multi-Process Developer Launcher</p>
           </div>
         </div>
 

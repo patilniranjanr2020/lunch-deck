@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 128" role="img" aria-labelledby="title">
+  <title id="title">LaunchDeck</title>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="#111827"/>
+  <rect x="27" y="35" width="82" height="70" rx="13" fill="#1F2937" stroke="#374151" stroke-width="3"/>
+
+  <circle cx="41" cy="55" r="5" fill="#34D399"/>
+  <rect x="54" y="51" width="34" height="8" rx="4" fill="#D1D5DB"/>
+
+  <circle cx="41" cy="73" r="5" fill="#FBBF24"/>
+  <rect x="54" y="69" width="26" height="8" rx="4" fill="#9CA3AF"/>
+
+  <circle cx="41" cy="91" r="5" fill="#FB7185"/>
+  <rect x="54" y="87" width="30" height="8" rx="4" fill="#9CA3AF"/>
+
+  <path d="M73 42 99 16M83 16h16v16"
+        fill="none" stroke="#34D399" stroke-width="7"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <text x="145" y="80" fill="#F9FAFB"
+        font-family="system-ui, sans-serif" font-size="42" font-weight="700">Launch</text>
+  <text x="292" y="80" fill="#34D399"
+        font-family="system-ui, sans-serif" font-size="42" font-weight="700">Deck</text>
+</svg>
