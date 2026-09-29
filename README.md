@@ -60,6 +60,12 @@ Once started, Launch Deck monitors the process status in real-time:
 
 ## 🚀 Getting Started
 
+### Download
+
+Download the latest Windows installer for `v0.1.0`:
+
+[Download LaunchDeck 0.1.0 for Windows](https://github.com/patilniranjanr2020/lunch-deck/releases/download/v0.1.0/LaunchDeck_0.1.0_x64-setup.exe)
+
 ### Prerequisites
 
 Ensure you have the following installed:
