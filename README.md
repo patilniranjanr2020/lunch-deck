@@ -9,21 +9,21 @@
 ### 1. Add Runner Box
 Easily organize your services. Click the **+ Add Runner Box** button to configure a new process card for your backend, frontend, worker, or custom script.
 
-![Step 1: Add Runner Box](docs/screenshots/1.png)
+<img src="docs/screenshots/1.png" alt="Step 1: Add Runner Box" width="100%" />
 
 ---
 
 ### 2. Configure Command
 Specify the launch command you want to run (e.g., `npm run dev`, `cargo run`, `mvn spring-boot:run`, or `python app.py`).
 
-![Step 2: Enter Command](docs/screenshots/2.png)
+<img src="docs/screenshots/2.png" alt="Step 2: Enter Command" width="100%" />
 
 ---
 
 ### 3. Set Working Directory & Start
 Set the target project folder or working directory path (`cwd`) where the command should execute, then press **START**.
 
-![Step 3: Set Working Directory and Start](docs/screenshots/3.png)
+<img src="docs/screenshots/3.png" alt="Step 3: Set Working Directory and Start" width="100%" />
 
 ---
 
@@ -33,7 +33,7 @@ Once started, Launch Deck monitors the process status in real-time:
 - **Collapsible Real-Time Logs**: View, expand, and inspect streaming stdout/stderr outputs with ANSI color stripping.
 - **One-Click Controls**: Easily stop processes, clear logs, or copy terminal output.
 
-![Step 4: Running Process, Detected URLs, and Logs](docs/screenshots/4.png)
+<img src="docs/screenshots/4.png" alt="Step 4: Running Process, Detected URLs, and Logs" width="100%" />
 
 ---
 
